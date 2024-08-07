@@ -14,6 +14,7 @@ struct memspaceNumaTest : ::numaNodesTest {
     void SetUp() override {
         ::numaNodesTest::SetUp();
 
+        ASSERT_NE(nullptr, nullptr);
         umf_result_t ret = umfMemspaceCreateFromNumaArray(
             nodeIds.data(), nodeIds.size(), &hMemspace);
         ASSERT_EQ(ret, UMF_RESULT_SUCCESS);
@@ -112,6 +113,25 @@ TEST_F(numaNodesTest, memtargetsInvalid) {
     umfMemspaceDestroy(hMemspace);
 }
 
+TEST_F(memspaceNumaTest, memspaceCopyTarget) {
+    umf_memspace_handle_t hMemspaceCopy = nullptr;
+    auto ret = umfMemspaceNew(&hMemspaceCopy);
+    ASSERT_EQ(ret, UMF_RESULT_SUCCESS);
+    ASSERT_NE(hMemspaceCopy, nullptr);
+
+    for (size_t i = 0; i < umfMemspaceMemtargetNum(hMemspace); ++i) {
+        auto target = umfMemspaceMemtargetGet(hMemspace, i);
+        ASSERT_NE(target, nullptr);
+
+        ret = umfMemspaceMemtargetAdd(hMemspaceCopy, target);
+        ASSERT_EQ(ret, UMF_RESULT_SUCCESS);
+    }
+
+    ASSERT_EQ(umfMemspaceMemtargetNum(hMemspace),
+              umfMemspaceMemtargetNum(hMemspaceCopy));
+
+    umfMemspaceDestroy(hMemspaceCopy);
+}
 TEST_F(memspaceNumaProviderTest, allocFree) {
     void *ptr = nullptr;
     size_t size = SIZE_4K;
