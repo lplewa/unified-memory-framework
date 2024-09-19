@@ -24,13 +24,9 @@ TEST_F(test, memTargetNuma) {
     }
 }
 
-TEST_F(numaNodesTest, getCapacity) {
+TEST_F(numaNodesCapacityTest, getCapacity) {
     auto memspace = umfMemspaceHostAllGet();
     ASSERT_NE(memspace, nullptr);
-    std::vector<size_t> capacities;
-    for (auto nodeId : nodeIds) {
-        capacities.push_back(numa_node_size64(nodeId, nullptr));
-    }
 
     for (size_t i = 0; i < umfMemspaceMemtargetNum(memspace); i++) {
         auto hTarget = umfMemspaceMemtargetGet(memspace, i);

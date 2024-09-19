@@ -40,13 +40,18 @@ EXPORTS
     umfMempolicyDestroy
     umfMempolicySetCustomSplitPartitions
     umfMempolicySetInterleavePartSize
-    umfMemspaceNew
+    umfMemspaceClone
     umfMemspaceDestroy
-    umfMemspaceMemtargetNum
-    umfMemspaceMemtargetGet
-    umfMemtargetGetCapacity
+    umfMemspaceFilterByCapacity
+    umfMemspaceFilterById
+    umfMemspaceNew
     umfMemspaceMemtargetAdd
+    umfMemspaceMemtargetGet
+    umfMemspaceMemtargetNum
     umfMemspaceMemtargetRemove
+    umfMemspaceUserFilter
+    umfMemtargetGetCapacity
+    umfMemtargetGetId
     umfMemtargetGetType
     umfOpenIPCHandle    
     umfPoolAlignedMalloc

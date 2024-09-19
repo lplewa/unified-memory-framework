@@ -426,3 +426,132 @@ umfMemspaceMemtargetRemove(umf_memspace_handle_t hMemspace,
     hMemspace->size--;
     return UMF_RESULT_SUCCESS;
 }
+
+static umf_result_t MemspaceFilter(umf_memspace_handle_t memspace,
+                                   umf_memspace_filter_func_t filter,
+                                   void *args) {
+
+    if (!memspace || !filter) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+    size_t idx = 0;
+    umf_result_t ret;
+    umf_memtarget_handle_t *nodesToRemove =
+        umf_ba_global_alloc(sizeof(*nodesToRemove) * memspace->size);
+
+    if (!nodesToRemove) {
+        return UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
+    }
+
+    for (size_t i = 0; i < memspace->size; i++) {
+        if (filter(memspace, memspace->nodes[i], args) == 0) {
+            nodesToRemove[idx++] = memspace->nodes[i];
+        }
+    }
+
+    size_t i = 0;
+    for (; i < idx; i++) {
+        umf_result_t ret =
+            umfMemspaceMemtargetRemove(memspace, nodesToRemove[i]);
+        if (ret != UMF_RESULT_SUCCESS) {
+            goto re_add;
+        }
+    }
+
+    umf_ba_global_free(nodesToRemove);
+    return UMF_RESULT_SUCCESS;
+
+re_add:
+    for (size_t j = 0; j < i; j++) {
+        umf_result_t ret2 = umfMemspaceMemtargetAdd(memspace, nodesToRemove[j]);
+        if (ret2 != UMF_RESULT_SUCCESS) {
+            ret =
+                UMF_RESULT_ERROR_UNKNOWN; // indicate that memspace is corrupted
+            break;
+        }
+    }
+
+    umf_ba_global_free(nodesToRemove);
+    return ret;
+}
+
+umf_result_t umfMemspaceUserFilter(umf_memspace_handle_t memspace,
+                                   umf_memspace_filter_func_t filter,
+                                   void *args) {
+
+    if (!memspace || !filter) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+    umf_result_t ret = MemspaceFilter(memspace, filter, args);
+
+    if (ret < 0) {
+        return UMF_RESULT_ERROR_USER_SPECIFIC;
+    }
+
+    return ret;
+}
+
+struct filter_by_id_args {
+    unsigned *ids;
+    size_t size;
+};
+
+int filterById(umf_const_memspace_handle_t memspace,
+               umf_const_memtarget_handle_t target, void *args) {
+    if (!memspace && !target && !args) {
+        return -UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
+    struct filter_by_id_args *filterArgs = args;
+    for (size_t i = 0; i < filterArgs->size; i++) {
+        unsigned id;
+        umf_result_t ret = umfMemtargetGetId(target, &id);
+        if (ret != UMF_RESULT_SUCCESS) {
+            return -ret;
+        }
+
+        if (id == filterArgs->ids[i]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int filterByCapacity(umf_const_memspace_handle_t memspace,
+                     umf_const_memtarget_handle_t target, void *args) {
+    if (!memspace && !target && !args) {
+        return -UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
+    size_t capacity;
+    umf_result_t ret = umfMemtargetGetCapacity(target, &capacity);
+    if (ret != UMF_RESULT_SUCCESS) {
+        return -ret;
+    }
+
+    size_t *targetCapacity = args;
+    return capacity >= *targetCapacity ? 1 : 0;
+}
+
+umf_result_t umfMemspaceFilterById(umf_memspace_handle_t memspace,
+                                   unsigned *ids, size_t size) {
+    if (!memspace || !ids || size == 0) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
+    struct filter_by_id_args args = {ids, size};
+    int ret = MemspaceFilter(memspace, &filterById, &args);
+
+    return ret < 0 ? -ret : ret;
+}
+
+umf_result_t umfMemspaceFilterByCapacity(umf_memspace_handle_t memspace,
+                                         size_t capacity) {
+    if (!memspace) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
+    int ret = MemspaceFilter(memspace, &filterByCapacity, &capacity);
+
+    return ret < 0 ? -ret : ret;
+}
