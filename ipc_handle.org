@@ -1,0 +1,338 @@
+* Issue
+Lets take an example code (please note that this (pseudo) code was never compiled)
+#+BEGIN_SRC c
+
+  struct ipc_packet { //used for comunication
+      void *handle; // ipc handle
+      size_t size; //alloc size
+  };
+
+  void producer() {
+      auto ops = umfOsMemoryProviderOps();
+      auto params = umfOsMemoryProviderParamsDefault();
+      set_map_shared(params);
+      umfMemoryProviderCreate(provider_ops, &params, &provider);
+      
+      size_t size;
+      void *ptr;
+      umfMemoryProviderAlloc(provider, 100, &ptr);
+      struct ipc_packet ipc;
+      ipc.size = 100;
+      umfMemoryProviderGetIPCHandleSize(provider, &size);
+      umfMemoryProviderGetIPCHandle(provider, ptr, 100, &ipc2.handle);
+
+      comms.sendIPCHandle(ipc2);
+      
+      struct ipc_packet ipc = comms.reciveIPCHandle();
+      umfMemoryProviderOpenIPCHandle(provider, ipc->handle, &ptr);
+      memset(ptr, 42, ipc->size);
+      umfMemoryProviderCloseIPCHandle(provider, ipc2->handle, ipc2->size);
+      
+      comms.sync();
+
+      umfMemoryProviderPutIPCHandle(provider, ipc2->handle);
+      umfMemoryProviderFree(provider, ptr, 100);
+  }
+
+   void client() {
+      //create provider
+      auto ops = umfOsMemoryProviderOps();
+      auto params = umfOsMemoryProviderParamsDefault();
+      set_map_shared(params);
+      umfMemoryProviderCreate(provider_ops, &params, &provider);
+      // recive and open handle
+      struct ipc_packet ipc = comms.reciveIPCHandle();
+      void *ptr;
+      umfMemoryProviderOpenIPCHandle(provider, ipc->handle, &ptr);
+      memset(ptr, 42, ipc->size);
+      umfMemoryProviderCloseIPCHandle(provider, ipc2->handle, ipc2->size);
+      
+      //allocate memory and send it to other process
+      size_t size;
+      umfMemoryProviderAlloc(provider, 100, &ptr);
+      struct ipc_packet ipc2;
+
+      umfMemoryProviderGetIPCHandleSize(provider, &size);
+      umfMemoryProviderGetIPCHandle(provider, ptr, 100, &ipc2.handle);
+      comms.sendIPCHandle(ipc2);
+      comms.sync();
+
+      umfMemoryProviderPutIPCHandle(provider, ipc2->handle);
+      umfMemoryProviderFree(provider, ptr, 100);
+      
+  }
+#+end_SRC
+* Issue cd.
+The problem begings when provider do not support sharing resource between providers.
+In that case we cannot allocate memory from two providers sharing  the same underlying resource.
+
+| Supports resource share | Do not support resource share | Special providers |
+|-------------------------+-------------------------------+-------------------|
+| Os                      | Dax                           | Coarse            |
+| Cuda                    | File                          | Tracking          |
+| Level zero              |                               |                   |
+
+#+BEGIN_SRC c
+
+    struct ipc_packet { //used for comunication
+        void *handle; // ipc handle
+        size_t size; //alloc size
+    };
+
+    void producer() {
+        auto *ops = umfFileMemoryProviderOps();
+        auto *params = umfFileMemoryProviderParamsDefault("/tmp/file");
+        umfMemoryProviderCreate(provider_ops, &params, &provider);
+        
+        size_t size;
+        void *ptr;
+        umfMemoryProviderAlloc(provider, 100, &ptr);
+        struct ipc_packet ipc;
+        ipc.size = 100;
+        umfMemoryProviderGetIPCHandleSize(provider, &size);
+        umfMemoryProviderGetIPCHandle(provider, ptr, 100, &ipc2.handle);
+
+        comms.sendIPCHandle(ipc2);
+  //    You should not do this
+  //      struct ipc_packet ipc = comms.reciveIPCHandle();
+  //      umfMemoryProviderOpenIPCHandle(provider, ipc->handle, &ptr);
+  //      memset(ptr, 42, ipc->size);
+  //      umfMemoryProviderCloseIPCHandle(provider, ipc2->handle, ipc2->size);
+        
+  //      comms.sync();
+
+        umfMemoryProviderPutIPCHandle(provider, ipc2->handle);
+        umfMemoryProviderFree(provider, ptr, 100);      
+    }
+
+      void client() {
+        // create provider
+        auto *ops = umfFileMemoryProviderOps();
+        auto *params = umfFileMemoryProviderParamsDefault("/tmp/file");
+        umfMemoryProviderCreate(provider_ops, &params, &provider);
+        // recive and open handle
+        struct ipc_packet ipc = comms.reciveIPCHandle();
+        void *ptr;
+        umfMemoryProviderOpenIPCHandle(provider, ipc->handle, &ptr);
+        memset(ptr, 42, ipc->size);
+        umfMemoryProviderCloseIPCHandle(provider, ipc2->handle, ipc2->size);
+        
+  //    You should not do this
+  //    size_t size;
+  //    umfMemoryProviderAlloc(provider, 100, &ptr);
+  //    struct ipc_packet ipc2;
+
+  //    umfMemoryProviderGetIPCHandleSize(provider, &size);
+  //    umfMemoryProviderGetIPCHandle(provider, ptr, 100, &ipc2.handle);
+  //    comms.sendIPCHandle(ipc2);
+  //    comms.sync();
+
+  //      umfMemoryProviderPutIPCHandle(provider, ipc2->handle);
+  //    umfMemoryProviderFree(provider, ptr, 100);
+        
+    }
+#+end_SRC
+
+We have few issues here:
+- Memory provider can do something with shared resources during initalization (so even following example migth not work correcly)
+- IPC api is designed to be used with memory pools too (and memory pools can allocate memory from provider during creation)
+  
+** Memory pools
+#+BEGIN_SRC c
+
+  struct ipc_packet { //used for comunication
+      void *handle; // ipc handle
+      size_t size; //alloc size
+  };
+
+  void producer() {
+      auto *ops = umfFileMemoryProviderOps();
+      auto *params = umfFileMemoryProviderParamsDefault("/tmp/file");
+      umfMemoryProviderCreate(provider_ops, &params, &provider);
+      umf_memory_pool_handle_t pool;
+      umf_result = umfPoolCreate(umfScalablePoolOps(), provider, NULL,
+                               0, &pool);
+      size_t size;
+      void *ptr = umfPoolAlloc(provider, 100);
+      struct ipc_packet ipc;
+      ipc.size = 100;
+      umfGetIPCHandle(ptr, ipc->handle, &size);
+      comms.sendIPCHandle(ipc2);
+      comms.sync();
+      umfPutIPCHandle(ipc2->handle);
+      umfPoolFree(provider, ptr);
+  }
+
+    void client() {
+      // create provider
+      auto *ops = umfFileMemoryProviderOps();
+      auto *params = umfFileMemoryProviderParamsDefault("/tmp/file");
+      umfMemoryProviderCreate(provider_ops, &params, &provider);
+      umf_memory_pool_handle_t pool;
+      umf_result = umfPoolCreate(umfScalablePoolOps(), provider, NULL,
+                               0, &pool);
+      // recive and open handle
+      struct ipc_packet ipc = comms.reciveIPCHandle();
+      void *ptr;
+      umfOpenIPCHandle(pool, ipc->handle, &ptr);
+      memset(ptr, 42, ipc->size);
+      umfCloseIPCHandle(ptr);
+      comms.sync();
+  }
+#+end_SRC
+  
+  
+  
+* Simple solution - NULL resource
+
+#+BEGIN_SRC c
+
+  struct ipc_packet { //used for comunication
+      void *handle; // ipc handle
+      size_t size; //alloc size
+  };
+
+  void producer() {
+      auto *ops = umfFileMemoryProviderOps();
+      auto *params = umfFileMemoryProviderParamsDefault("/tmp/file");
+      umfMemoryProviderCreate(provider_ops, &params, &provider);
+      umf_memory_pool_handle_t pool;
+      umf_result = umfPoolCreate(umfScalablePoolOps(), provider, NULL,
+                               0, &pool);
+      size_t size;
+      void *ptr = umfPoolAlloc(provider, 100);
+      struct ipc_packet ipc;
+      ipc.size = 100;
+      umfGetIPCHandle(ptr, ipc->handle, &size);
+      comms.sendIPCHandle(ipc2);
+      comms.sync();
+      umfPutIPCHandle(ipc2->handle);
+      umfPoolFree(provider, ptr);
+  }
+
+    void client() {
+      // create provider
+      auto *ops = umfFileMemoryProviderOps();
+      auto *params = umfFileMemoryProviderParamsDefault(NULL);
+      umfMemoryProviderCreate(provider_ops, &params, &provider);
+      umf_memory_pool_handle_t pool;
+      umf_result = umfPoolCreate(umfScalablePoolOps(), provider, NULL,
+                               0, &pool);
+      // recive and open handle
+      struct ipc_packet ipc = comms.reciveIPCHandle();
+      void *ptr;
+      umfOpenIPCHandle(pool, ipc->handle, &ptr);
+      memset(ptr, 42, ipc->size);
+      umfCloseIPCHandle(ptr);
+      comms.sync();
+  }
+#+end_SRC
+This solution has few issues:
+- Every memory Pool need extra code to handle providers with NULL resource (as said before, memory pool may allocate memory from provider during creation)
+- It is not user frendly and it's error prone.
+  - User has to know that in case of some providers he should use NULL resource on client but on others has to create the same provider.
+
+
+* Why we need provider on the client side at first?
+
+The anwer is that we do not need it. We need only 2 things
+** Resource
+in Case of some providers we have resource (file path) in IPC handle, but in case of ther we need ptr to device (GPU one), which has to be created on client side, and pased as argument to provider.
+** Params
+We need information about producer memory provider configuration (params). Not all informations are needed, but some of them are needed (permission)
+
+* Solution
+
+First of all we have to move "params" to IPC handle. So the only thing we have to provide other then IPC handle and provider ops is an resorce which has to be provided by the user on client side.
+#+BEGIN_SRC c
+  umfMemoryProviderGetIPCHandle(provider, ptr, size, &handle);
+  umfMemoryProviderPutIPCHandle(provider, handle);
+
+  umfMemoryProviderOpenIPCHandle(provider_ops, IPCparams, handle, &ptr);
+  umfMemoryProviderCloseIPCHandle(provider_ops/* note 1 */,  IPCparams/* note 1 */, ptr, size);
+  /* Note 1: not needed with tracking provider */
+#+end_src
+Maybe we have to merge ops and IPCparams in the single structure. Let's call it IPC_provider.(name not final)
+
+#+BEGIN_SRC c
+  umfMemoryProviderGetIPCHandle(provider, ptr, size, &handle);
+  umfMemoryProviderPutIPCHandle(provider, handle);
+
+  umfMemory/*IPC*/ProviderOpenIPCHandle(IPC_provider, handle, &ptr);
+  umfMemory/*IPC*/ProviderCloseIPCHandle(IPC_provider /* note 1 */, ptr, size);
+
+  umfMemoryProviderGetIPCProvider(provider, &IPC_provider); /* in case if user want to use standard provider on client side*/
+  umfMemory/*IPC*/ProviderCreateIPCProvider(provider, IPCparams, IPC_provider); /* in case if user only open allocation, and do not need memory provider */
+  
+  /* Note 1: not needed with tracking provider */
+#+end_src
+We can extend api from previus discussion topic([[https://github.com/oneapi-src/unified-memory-framework/issues/844][#844]]) by adding extra agument to createFooParams() function
+#+BEGIN_SRC C
+  foo_params_handle_t IPCparams = umfCreateFooParams(isIPC);
+  umfFooParamsSetField1(IPCparams, 7); /* can return an error code if it's not needed for IPC */
+
+  umf_memory_provider_handle_t hProvider = NULL;
+  umf_memory_provider_ops_t *foo_ops = umfFooMemoryProviderOps();
+  umfMemory/*IPC*/ProviderCreateIPCProvider(provider, IPCparams, IPC_provider);
+    
+#+END_SRC
+
+In case of pool IPC api nothing has to be changed. We do this IPC provider on our side. But user can use use Pool on producer side, and provider on client if it do not need pool (or pool is not suported)
+
+#+BEGIN_SRC c
+
+  struct ipc_packet { //used for comunication
+      void *handle; // ipc handle
+      size_t size; //alloc size
+  };
+
+  void producer() {
+      auto *ops = umfFileMemoryProviderOps();
+      auto *params = umfFileMemoryProviderParamsDefault("/tmp/file", false);
+      umfMemoryProviderCreate(provider_ops, &params, &provider);
+      umf_memory_pool_handle_t pool;
+      umf_result = umfPoolCreate(umfScalablePoolOps(), provider, NULL,
+                               0, &pool);
+      size_t size;
+      void *ptr = umfPoolAlloc(provider, 100);
+      struct ipc_packet ipc;
+      ipc.size = 100;
+      umfGetIPCHandle(ptr, ipc->handle, &size);
+      comms.sendIPCHandle(ipc2);
+      comms.sync();
+      umfPutIPCHandle(ipc2->handle);
+      umfPoolFree(provider, ptr);
+  }
+
+    void client() {
+      // create provider
+      auto *ops = umfFileMemoryProviderOps();
+      auto *params = umfFileMemoryProviderParamsDefault("/tmp/file", true);
+      umfIPCProviderCreate(ops, params, &IPC_provider);
+
+      // recive and open handle
+      struct ipc_packet ipc = comms.reciveIPCHandle();
+      void *ptr;
+      umfIPCProviderOpenIPCHandle(IPC_provider, handle, &ptr);
+      umfOpenIPCHandle(pool, ipc->handle, &ptr);
+      memset(ptr, 42, ipc->size);
+  #ifdef USE_TRACKIG_PROVIDER
+      umfIPCProviderCloseIPCHandle(ptr)
+  #else
+      umfIPCProviderCloseIPCHandle(IPC_provider, ptr, size)
+  #endif
+      comms.sync();
+  }
+#+end_SRC
+
+
+
+
+* Backup
+We need API to get size of allocation from IPC handle on client side. This is anoing that we do not have it.
+#+BEGIN_SRC c
+  size_t size;
+  umfIPCProviderOpenIPCHandle(IPC_provider, handle, &ptr, &size); // size ptr might be null
+  // or
+  umfIPCProviderGetAllocationSize(IPC_provider, handle, &size); // this might be confusing with handle size function
+#+end_src
