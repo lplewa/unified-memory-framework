@@ -1,0 +1,63 @@
+* comparation bechmarks
+Those bechmarks are created to measure overhead of UMF, and showcase performance "gains"
+There is <pool configs> X <Sizes> X <patterns> X <Threads> combinations.
+** 1 set
+*** Pools configs
+- disjoint_pool<os_provider>
+- jemalloc_pool<os_provider>
+- scalable_pool<os_provider>
+- disjoint_pool<coarse<os_provider>>
+- jemalloc_pool<coarse<os_provider>>
+- scalable_pool<coarse<os_provider>>
+- plain glibc malloc 
+- plain jemalloc
+- plain scalablemalloc
+- proxy lib (just run umf-bechmark --bechmark_filter="glibc")  
+*** Sizes
+- page alloc
+- Variable random size <8 bytes, 4k>
+- Variable random size <8 bytes, 64k>
+- Variable random size <4k, 64k>  
+*** Alloc pattern
+- 1000 alloc and free per loop
+- preallocate 10000 allocs and then 1000 alloc and free per loop
+*** Threads
+- single threded
+- multi threded (not sure how many, but a higher is better)
+*** Details
+compare on single chart umf_pool vs plain allocator(where posible) vs plain glibc malloc.
+also comapre coarse provider vs without one. 
+** 2 set
+*** Pools configs
+- L0 provider
+- Cuda provider
+- plain L0
+- plain cuda
+*** Sizes
+- tbd
+***  Alloc pattern
+- 1000 alloc and free per loop
+- preallocate 10000 allocs and then 1000 alloc and free per loop
+*** Threads
+- single threded
+- multi threded (propably 2-4 enough to check if we can scale on provider level)
+*** Details
+compare on single chart provider vs plain memory. In case of l0 we can consider testing different memory types
+but from umf perspective, it should not matter. 
+* performance tracking bechmarks
+Those benchmarks are focused to track performance changes over umf versions.
+Some selection (or all) from previus section should be included here too.
+Additionaly we want to test file and dax providers, in similar variants to comparation bechmarks.
+* IPC
+TBH - for sure we need separate benchmark for it. For now we will ignore existence of IPC.(Maybe Sergey will help with it later on)
+* Special cases
+some special cases which we might want to bechmark, but they are lower priorty.
+- proxy lib trashold
+- diffrent os provider configurations (especialy those strange one which requires multiple mbinds)
+- windows?
+- realloc and calloc (propably realoc is top piority from this list)
+  
+* CTL
+ - when CTL will be ready we can use it to bechmark fragmentation measured as
+   <memory allocated from provider> vs <memory allocated from pool>
+ - proably CTL might add extra test points (different allocator configurations), but this is TBD
