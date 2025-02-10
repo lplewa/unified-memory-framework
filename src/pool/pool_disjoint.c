@@ -68,13 +68,8 @@ static slab_t *create_slab(bucket_t *bucket) {
     slab->first_free_chunk_idx = 0;
     slab->bucket = bucket;
 
-    slab->iter = umf_ba_global_alloc(sizeof(*slab->iter));
-    if (slab->iter == NULL) {
-        LOG_ERR("allocation of new slab iter failed!");
-        goto free_slab;
-    }
-    slab->iter->val = slab;
-    slab->iter->prev = slab->iter->next = NULL;
+    slab->iter.val = slab;
+    slab->iter.prev = slab->iter.next = NULL;
 
     slab->num_chunks_total =
         utils_max(bucket_slab_min_size(bucket) / bucket->size, 1);
@@ -86,7 +81,7 @@ static slab_t *create_slab(bucket_t *bucket) {
                                                   sizeof(*slab->chunks.chunks));
         if (slab->chunks.chunks == NULL) {
             LOG_ERR("allocation of slab chunks failed!");
-            goto free_slab_iter;
+            goto free_slab;
         }
 
         memset(slab->chunks.chunks, 0,
@@ -121,9 +116,6 @@ free_slab_chunks:
         umf_ba_global_free(slab->chunks.chunks);
     }
 
-free_slab_iter:
-    umf_ba_global_free(slab->iter);
-
 free_slab:
     umf_ba_global_free(slab);
     return NULL;
@@ -142,7 +134,6 @@ static void destroy_slab(slab_t *slab) {
     if (slab->num_chunks_total > 64) {
         umf_ba_global_free(slab->chunks.chunks);
     }
-    umf_ba_global_free(slab->iter);
     umf_ba_global_free(slab);
 }
 
@@ -333,7 +324,7 @@ static void bucket_free_chunk(bucket_t *bucket, void *ptr, slab_t *slab,
     // in case if the slab was previously full and now has single available
     // chunk, it should be moved to the list of available slabs
     if (slab_get_num_free_chunks(slab) == 1) {
-        slab_list_item_t *slab_it = slab->iter;
+        slab_list_item_t *slab_it = &slab->iter;
         assert(slab_it->val != NULL);
         DL_DELETE(bucket->unavailable_slabs, slab_it);
         DL_PREPEND(bucket->available_slabs, slab_it);
@@ -349,7 +340,7 @@ static void bucket_free_chunk(bucket_t *bucket, void *ptr, slab_t *slab,
         *to_pool = bucket_can_pool(bucket);
         if (*to_pool == false) {
             // remove slab
-            slab_list_item_t *slab_it = slab->iter;
+            slab_list_item_t *slab_it = &slab->iter;
             assert(slab_it->val != NULL);
             slab_unreg(slab_it->val);
             DL_DELETE(bucket->available_slabs, slab_it);
@@ -401,7 +392,7 @@ static slab_t *bucket_create_slab(bucket_t *bucket) {
         return NULL;
     }
 
-    DL_PREPEND(bucket->available_slabs, slab->iter);
+    DL_PREPEND(bucket->available_slabs, &slab->iter);
     bucket->available_slabs_num++;
     bucket_update_stats(bucket, 1, 0);
 
