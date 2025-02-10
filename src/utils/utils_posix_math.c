@@ -1,6 +1,6 @@
 /*
  *
- * Copyright (C) 2023 Intel Corporation
+ * Copyright (C) 2023-2025 Intel Corporation
  *
  * Under the Apache License v2.0 with LLVM Exceptions. See LICENSE.TXT.
  * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -17,4 +17,10 @@ size_t getLeftmostSetBitPos(size_t num) {
     assert(num != 0 &&
            "Finding leftmost set bit when number equals zero is undefined");
     return (sizeof(num) * CHAR_BIT - 1) - __builtin_clzll(num);
+}
+
+size_t getRightmostSetBitPos(size_t num) {
+    assert(num != 0 &&
+           "Finding rightmost set bit when number equals zero is undefined");
+    return __builtin_ctzll(num);
 }
