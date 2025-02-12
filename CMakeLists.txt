@@ -60,8 +60,6 @@ endmacro()
 umf_option(UMF_BUILD_SHARED_LIBRARY "Build UMF as shared library" OFF)
 umf_option(UMF_BUILD_LEVEL_ZERO_PROVIDER "Build Level Zero memory provider" ON)
 umf_option(UMF_BUILD_CUDA_PROVIDER "Build CUDA memory provider" ON)
-umf_option(UMF_BUILD_LIBUMF_POOL_DISJOINT
-           "Build the libumf_pool_disjoint static library" OFF)
 umf_option(UMF_BUILD_LIBUMF_POOL_JEMALLOC
            "Build the libumf_pool_jemalloc static library" OFF)
 umf_option(UMF_BUILD_TESTS "Build UMF tests" ON)
@@ -454,11 +452,11 @@ if(UMF_BUILD_CUDA_PROVIDER AND (NOT UMF_CUDA_INCLUDE_DIR))
     set(CUDA_INCLUDE_DIRS
         ${cuda-headers_SOURCE_DIR}
         CACHE PATH "Path to CUDA headers")
-    message(STATUS "CUDA include directory: ${CUDA_INCLUDE_DIRS}")
+    message(STATUS "CUDA_INCLUDE_DIRS = ${CUDA_INCLUDE_DIRS}")
 elseif(UMF_BUILD_CUDA_PROVIDER)
     # Only header is needed to build UMF
     set(CUDA_INCLUDE_DIRS ${UMF_CUDA_INCLUDE_DIR})
-    message(STATUS "CUDA include directory: ${CUDA_INCLUDE_DIRS}")
+    message(STATUS "CUDA_INCLUDE_DIRS = ${CUDA_INCLUDE_DIRS}")
 endif()
 
 # This build type check is not possible on Windows when CMAKE_BUILD_TYPE is not
@@ -497,8 +495,8 @@ endif()
 # For using the options listed in the OPTIONS_REQUIRING_CXX variable a C++17
 # compiler is required. Moreover, if these options are not set, CMake will set
 # up a strict C build, without C++ support.
-set(OPTIONS_REQUIRING_CXX "UMF_BUILD_TESTS" "UMF_BUILD_LIBUMF_POOL_DISJOINT"
-                          "UMF_BUILD_BENCHMARKS_MT" "UMF_BUILD_BENCHMARKS")
+set(OPTIONS_REQUIRING_CXX "UMF_BUILD_TESTS" "UMF_BUILD_BENCHMARKS_MT"
+                          "UMF_BUILD_BENCHMARKS")
 foreach(option_name ${OPTIONS_REQUIRING_CXX})
     if(${option_name})
         enable_language(CXX)
