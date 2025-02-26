@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023-2024 Intel Corporation
+ * Copyright (C) 2023-2025 Intel Corporation
  *
  * Under the Apache License v2.0 with LLVM Exceptions. See LICENSE.TXT.
  * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -10,7 +10,6 @@
 
 #include <limits.h>
 #include <stdbool.h>
-
 #if defined(_WIN32) && !defined(NAME_MAX)
 #include <stdlib.h>
 #define NAME_MAX _MAX_FNAME
@@ -68,6 +67,11 @@ typedef struct os_memory_provider_t {
     size_t partitions_weight_sum;
 
     hwloc_topology_t topo;
+    struct {
+        _Atomic(size_t) allocated_memory;
+        _Atomic(size_t) peak_memory;
+        utils_mutex_t lock; // lock for updating stats
+    } stats;
 } os_memory_provider_t;
 
 #ifdef __cplusplus
