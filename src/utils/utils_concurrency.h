@@ -22,14 +22,14 @@
 #else
 #include <pthread.h>
 
+#endif /* _WIN32 */
+
 #ifndef __cplusplus
 #include <stdatomic.h>
 #else /* __cplusplus */
 #include <atomic>
 #define _Atomic(X) std::atomic<X>
 #endif /* __cplusplus */
-
-#endif /* _WIN32 */
 
 #include "utils_sanitizers.h"
 

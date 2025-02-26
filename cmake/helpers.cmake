@@ -270,6 +270,7 @@ function(add_umf_target_compile_options name)
                     /W4
                     /Gy
                     /GS
+                    /experimental:c11atomics
                     # disable warning 6326: Potential comparison of a constant
                     # with another constant
                     /wd6326

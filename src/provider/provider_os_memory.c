@@ -6,14 +6,14 @@
 */
 
 #include <assert.h>
+#include <ctl/ctl.h>
 #include <errno.h>
 #include <limits.h>
+
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include <ctl/ctl.h>
 #include <umf.h>
 #include <umf/base.h>
 #include <umf/memory_provider.h>
@@ -187,12 +187,66 @@ static int CTL_READ_HANDLER(ipc_enabled)(void *ctx,
     return 0;
 }
 
+static int CTL_READ_HANDLER(peak_memory)(void *ctx,
+                                         umf_ctl_query_source_t source,
+                                         void *arg,
+                                         umf_ctl_index_utlist_t *indexes,
+                                         const char *extra_name,
+                                         umf_ctl_query_type_t query_type) {
+    /* suppress unused-parameter errors */
+    (void)source, (void)indexes, (void)ctx, (void)extra_name, (void)query_type;
+
+    size_t *arg_out = arg;
+    os_memory_provider_t *os_provider = (os_memory_provider_t *)ctx;
+    *arg_out = atomic_load_explicit(&os_provider->stats.peak_memory,
+                                    memory_order_relaxed);
+    return 0;
+}
+
+static int CTL_READ_HANDLER(allocated_memory)(void *ctx,
+                                              umf_ctl_query_source_t source,
+                                              void *arg,
+                                              umf_ctl_index_utlist_t *indexes,
+                                              const char *extra_name,
+                                              umf_ctl_query_type_t query_type) {
+    /* suppress unused-parameter errors */
+    (void)source, (void)indexes, (void)ctx, (void)extra_name, (void)query_type;
+
+    size_t *arg_out = arg;
+    os_memory_provider_t *os_provider = (os_memory_provider_t *)ctx;
+    *arg_out = atomic_load_explicit(&os_provider->stats.allocated_memory,
+                                    memory_order_relaxed);
+
+    return 0;
+}
+
+static int CTL_RUNNABLE_HANDLER(reset)(void *ctx, umf_ctl_query_source_t source,
+                                       void *arg,
+                                       umf_ctl_index_utlist_t *indexes,
+                                       const char *extra_name,
+                                       umf_ctl_query_type_t query_type) {
+    /* suppress unused-parameter errors */
+    (void)source, (void)indexes, (void)arg, (void)extra_name, (void)query_type;
+
+    os_memory_provider_t *os_provider = (os_memory_provider_t *)ctx;
+    size_t allocated = atomic_load_explicit(
+        &os_provider->stats.allocated_memory, memory_order_relaxed);
+    atomic_store_explicit(&os_provider->stats.peak_memory, allocated,
+                          memory_order_relaxed);
+
+    return 0;
+}
+static const umf_ctl_node_t CTL_NODE(stats)[] = {
+    CTL_LEAF_RO(allocated_memory), CTL_LEAF_RO(peak_memory),
+    CTL_LEAF_RUNNABLE(reset), CTL_NODE_END};
+
 static const umf_ctl_node_t CTL_NODE(params)[] = {CTL_LEAF_RO(ipc_enabled),
                                                   CTL_NODE_END};
 
 static void initialize_os_ctl(void) {
     os_memory_ctl_root = ctl_new();
     CTL_REGISTER_MODULE(os_memory_ctl_root, params);
+    CTL_REGISTER_MODULE(os_memory_ctl_root, stats);
 }
 
 static void os_store_last_native_error(int32_t native_error, int errno_value) {
@@ -656,11 +710,17 @@ static umf_result_t os_initialize(void *params, void **provider) {
         goto err_destroy_bitmaps;
     }
 
+    if (utils_mutex_init(&os_provider->stats.lock) == NULL) {
+        LOG_ERR("initializing the stats lock failed");
+        ret = UMF_RESULT_ERROR_UNKNOWN;
+        goto err_destroy_bitmaps;
+    }
+
     if (os_provider->fd > 0) {
         if (utils_mutex_init(&os_provider->lock_fd) == NULL) {
             LOG_ERR("initializing the file size lock failed");
             ret = UMF_RESULT_ERROR_UNKNOWN;
-            goto err_destroy_bitmaps;
+            goto err_destroy_stats_lock;
         }
     }
 
@@ -682,6 +742,8 @@ static umf_result_t os_initialize(void *params, void **provider) {
 
     return UMF_RESULT_SUCCESS;
 
+err_destroy_stats_lock:
+    utils_mutex_destroy_not_free(&os_provider->stats.lock);
 err_destroy_bitmaps:
     free_bitmaps(os_provider);
 err_destroy_critnib:
@@ -699,6 +761,7 @@ static void os_finalize(void *provider) {
     if (os_provider->fd > 0) {
         utils_mutex_destroy_not_free(&os_provider->lock_fd);
     }
+    utils_mutex_destroy_not_free(&os_provider->stats.lock);
 
     critnib_delete(os_provider->fd_offset_map);
 
@@ -1109,6 +1172,24 @@ static umf_result_t os_alloc(void *provider, size_t size, size_t alignment,
 
     *resultPtr = addr;
 
+    atomic_fetch_add_explicit(&os_provider->stats.allocated_memory, size,
+                              memory_order_relaxed);
+
+    size_t allocated = atomic_load_explicit(
+        &os_provider->stats.allocated_memory, memory_order_relaxed);
+    size_t peak = atomic_load_explicit(&os_provider->stats.peak_memory,
+                                       memory_order_relaxed);
+
+    while (allocated > peak &&
+           !atomic_compare_exchange_weak_explicit(
+               &os_provider->stats.peak_memory, &peak, /* expected */
+               allocated,                              /* desired */
+               memory_order_relaxed, memory_order_relaxed)) {
+        /* If the compare-exchange fails, 'peak' is updated to the current value of peak_memory.
+       We then re-check whether allocated is still greater than the updated peak value. */
+        ;
+    }
+
     return UMF_RESULT_SUCCESS;
 
 err_unmap:
@@ -1135,6 +1216,9 @@ static umf_result_t os_free(void *provider, void *ptr, size_t size) {
 
         return UMF_RESULT_ERROR_MEMORY_PROVIDER_SPECIFIC;
     }
+
+    atomic_fetch_sub_explicit(&os_provider->stats.allocated_memory, size,
+                              memory_order_relaxed);
 
     return UMF_RESULT_SUCCESS;
 }

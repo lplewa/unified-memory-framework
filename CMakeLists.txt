@@ -38,6 +38,7 @@ if(PROJECT_VERSION_PATCH GREATER 0)
     set(UMF_VERSION_BUGFIX 1)
 endif()
 
+set(CMAKE_C_STANDARD 11)
 include(CTest)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
