@@ -318,6 +318,8 @@ static void tbb_pool_finalize(void *pool) {
     tbb_memory_pool_t *pool_data = (tbb_memory_pool_t *)pool;
     tbb_callbacks.pool_destroy(pool_data->tbb_pool);
     umf_ba_global_free(pool_data);
+    tbb_initialized = UTIL_ONCE_FLAG_INIT;
+    fini_tbb_global_state();
 }
 
 static void *tbb_malloc(void *pool, size_t size) {
