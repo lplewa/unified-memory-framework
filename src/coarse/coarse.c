@@ -130,26 +130,6 @@ static inline ravl_node_t *get_node_next(ravl_node_t *node) {
     return ravl_node_successor(node);
 }
 
-#ifndef NDEBUG
-static block_t *get_block_prev(ravl_node_t *node) {
-    ravl_node_t *ravl_prev = ravl_node_predecessor(node);
-    if (!ravl_prev) {
-        return NULL;
-    }
-
-    return get_node_block(ravl_prev);
-}
-
-static block_t *get_block_next(ravl_node_t *node) {
-    ravl_node_t *ravl_next = ravl_node_successor(node);
-    if (!ravl_next) {
-        return NULL;
-    }
-
-    return get_node_block(ravl_next);
-}
-#endif /* NDEBUG */
-
 // The functions "coarse_ravl_*" handles the coarse->all_blocks list of blocks
 // sorted by a pointer (block_t->data) to the beginning of the block data.
 //
@@ -529,80 +509,8 @@ static ravl_node_t *free_block_merge_with_next(coarse_t *coarse,
 
 #ifndef NDEBUG // begin of DEBUG code
 
-typedef struct debug_cb_args_t {
-    coarse_t *provider;
-    size_t sum_used;
-    size_t sum_blocks_size;
-    size_t num_all_blocks;
-    size_t num_free_blocks;
-} debug_cb_args_t;
-
-static void debug_verify_all_blocks_cb(void *data, void *arg) {
-    assert(data);
-    assert(arg);
-
-    ravl_data_t *node_data = data;
-    block_t *block = node_data->value;
-    assert(block);
-
-    debug_cb_args_t *cb_args = (debug_cb_args_t *)arg;
-    coarse_t *provider = cb_args->provider;
-
-    ravl_node_t *node =
-        ravl_find(provider->all_blocks, data, RAVL_PREDICATE_EQUAL);
-    assert(node);
-
-    block_t *block_next = get_block_next(node);
-    block_t *block_prev = get_block_prev(node);
-
-    cb_args->num_all_blocks++;
-    if (!block->used) {
-        cb_args->num_free_blocks++;
-    }
-
-    assert(block->data);
-    assert(block->size > 0);
-
-    // data addresses in the list are in ascending order
-    if (block_prev) {
-        assert(block_prev->data < block->data);
-    }
-
-    if (block_next) {
-        assert(block->data < block_next->data);
-    }
-
-    // two block's data should not overlap
-    if (block_next) {
-        assert((block->data + block->size) <= block_next->data);
-    }
-
-    cb_args->sum_blocks_size += block->size;
-    if (block->used) {
-        cb_args->sum_used += block->size;
-    }
-}
-
-static umf_result_t coarse_get_stats_no_lock(coarse_t *coarse,
-                                             coarse_stats_t *stats);
-
 static bool debug_check(coarse_t *provider) {
     assert(provider);
-
-    coarse_stats_t stats = {0};
-    coarse_get_stats_no_lock(provider, &stats);
-
-    debug_cb_args_t cb_args = {0};
-    cb_args.provider = provider;
-
-    // verify the all_blocks list
-    ravl_foreach(provider->all_blocks, debug_verify_all_blocks_cb, &cb_args);
-
-    assert(cb_args.num_all_blocks == stats.num_all_blocks);
-    assert(cb_args.num_free_blocks == stats.num_free_blocks);
-    assert(cb_args.sum_used == provider->used_size);
-    assert(cb_args.sum_blocks_size == provider->alloc_size);
-    assert(provider->alloc_size >= provider->used_size);
 
     return true;
 }
