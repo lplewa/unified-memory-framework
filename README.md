@@ -75,7 +75,7 @@ In order to build the benchmark, the `UMF_BUILD_BENCHMARKS` CMake configuration 
 
 UMF also provides multithreaded benchmarks that can be enabled by setting both
 `UMF_BUILD_BENCHMARKS` and `UMF_BUILD_BENCHMARKS_MT` CMake
-configuration flags to `ON`. Multithreaded benchmarks require a C++ support.
+configuration flags to `ON`. Multithreaded benchmarks require C++ support.
 
 The Scalable Pool requirements can be found in the relevant 'Memory Pool
 managers' section below.
