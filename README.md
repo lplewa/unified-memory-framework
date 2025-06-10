@@ -18,10 +18,7 @@ For a quick introduction to UMF usage, please see
 [examples](https://oneapi-src.github.io/unified-memory-framework/examples.html)
 documentation, which includes the code of the
 [basic example](https://github.com/oneapi-src/unified-memory-framework/blob/main/examples/basic/basic.c).
-The are also more advanced that allocates USM memory from the
-[Level Zero device](https://github.com/oneapi-src/unified-memory-framework/blob/main/examples/level_zero_shared_memory/level_zero_shared_memory.c)
-using the Level Zero API and UMF Level Zero memory provider and [CUDA device](https://github.com/oneapi-src/unified-memory-framework/blob/main/examples/cuda_shared_memory/cuda_shared_memory.c)
-using the CUDA API and UMF CUDA memory provider.
+There are also more advanced examples that allocate USM memory from the [Level Zero device](examples/level_zero_shared_memory/level_zero_shared_memory.c) using the Level Zero API and UMF Level Zero memory provider and [CUDA device](examples/cuda_shared_memory/cuda_shared_memory.c) using the CUDA API and UMF CUDA memory provider.
 
 ## Build
 
