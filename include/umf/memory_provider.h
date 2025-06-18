@@ -24,7 +24,7 @@ typedef enum umf_memory_visibility_t {
 } umf_memory_visibility_t;
 
 /// @brief Protection of the memory allocations
-typedef enum umf_mem_protection_flags_t {
+typedef enum umf_mem_protection_flag_t {
     UMF_PROTECTION_NONE = (1 << 0),  ///< Memory allocations can not be accessed
     UMF_PROTECTION_READ = (1 << 1),  ///< Memory allocations can be read.
     UMF_PROTECTION_WRITE = (1 << 2), ///< Memory allocations can be written.
@@ -32,7 +32,7 @@ typedef enum umf_mem_protection_flags_t {
     /// @cond
     UMF_PROTECTION_MAX // must be the last one
     /// @endcond
-} umf_mem_protection_flags_t;
+} umf_mem_protection_flag_t;
 
 /// @brief A struct containing memory provider specific set of functions
 typedef struct umf_memory_provider_t *umf_memory_provider_handle_t;
@@ -101,9 +101,9 @@ umf_result_t umfMemoryProviderFree(umf_memory_provider_handle_t hProvider,
 ///        result in string representation
 /// @param pError [out] pointer to an integer where the adapter specific error code will be stored
 ///
-void umfMemoryProviderGetLastNativeError(umf_memory_provider_handle_t hProvider,
-                                         const char **ppMessage,
-                                         int32_t *pError);
+umf_result_t
+umfMemoryProviderGetLastNativeError(umf_memory_provider_handle_t hProvider,
+                                    const char **ppMessage, int32_t *pError);
 
 ///
 /// @brief Retrieve recommended page size for a given allocation size.
@@ -219,7 +219,8 @@ umfMemoryProviderCloseIPCHandle(umf_memory_provider_handle_t hProvider,
 /// @param hProvider handle to the memory provider
 /// @return pointer to a string containing the name of the \p hProvider
 ///
-const char *umfMemoryProviderGetName(umf_memory_provider_handle_t hProvider);
+umf_result_t umfMemoryProviderGetName(umf_memory_provider_handle_t hProvider,
+                                      const char **name);
 
 ///
 /// @brief Retrieve handle to the last memory provider that returned status other
@@ -231,7 +232,8 @@ const char *umfMemoryProviderGetName(umf_memory_provider_handle_t hProvider);
 ///
 /// @return Handle to the memory provider
 ///
-umf_memory_provider_handle_t umfGetLastFailedMemoryProvider(void);
+umf_result_t
+umfGetLastFailedMemoryProvider(umf_memory_provider_handle_t *provider);
 
 ///
 /// @brief Splits a coarse grain allocation into 2 adjacent allocations that
@@ -245,7 +247,8 @@ umf_memory_provider_handle_t umfGetLastFailedMemoryProvider(void);
 ///
 umf_result_t
 umfMemoryProviderAllocationSplit(umf_memory_provider_handle_t hProvider,
-                                 void *ptr, size_t totalSize, size_t firstSize);
+                                 const void *ptr, size_t totalSize,
+                                 size_t firstSize);
 
 ///
 /// @brief Merges two coarse grain allocations into a single allocation that
@@ -259,7 +262,8 @@ umfMemoryProviderAllocationSplit(umf_memory_provider_handle_t hProvider,
 ///
 umf_result_t
 umfMemoryProviderAllocationMerge(umf_memory_provider_handle_t hProvider,
-                                 void *lowPtr, void *highPtr, size_t totalSize);
+                                 const void *lowPtr, const void *highPtr,
+                                 size_t totalSize);
 
 #ifdef __cplusplus
 }

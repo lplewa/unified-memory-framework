@@ -95,7 +95,8 @@ typedef struct umf_memory_pool_ops_t {
     /// @param ptr pointer to the allocated memory
     /// @return size of the memory block allocated from the \p pool
     ///
-    size_t (*malloc_usable_size)(void *pool, const void *ptr);
+    umf_result_t (*malloc_usable_size)(void *pool, const void *ptr,
+                                       size_t *size);
 
     ///
     /// @brief Frees the memory space of the specified \p pool pointed by \p ptr
@@ -105,7 +106,7 @@ typedef struct umf_memory_pool_ops_t {
     ///         Whether any status other than UMF_RESULT_SUCCESS can be returned
     ///         depends on the memory provider used by the \p pool.
     ///
-    umf_result_t (*free)(void *pool, void *);
+    umf_result_t (*free)(void *pool, void *ptr);
 
     ///
     /// @brief Retrieve \p umf_result_t representing the error of the last failed allocation
@@ -160,7 +161,7 @@ typedef struct umf_memory_pool_ops_t {
     ///   otherwise the pool's name is returned.
     /// @return A constant character string representing the pool's name.
     ///
-    const char *(*ext_get_name)(void *pool);
+    umf_result_t (*ext_get_name)(void *pool, const char **name);
 } umf_memory_pool_ops_t;
 
 #ifdef __cplusplus

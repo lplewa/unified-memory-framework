@@ -7,6 +7,7 @@
  *
  */
 
+#include <stddef.h>
 #ifndef UMF_MEMORY_POOL_H
 #define UMF_MEMORY_POOL_H 1
 
@@ -107,7 +108,8 @@ void *umfPoolRealloc(umf_memory_pool_handle_t hPool, void *ptr, size_t size);
 /// @param ptr pointer to the allocated memory
 /// @return size of the memory block allocated from the \p hPool
 ///
-size_t umfPoolMallocUsableSize(umf_memory_pool_handle_t hPool, const void *ptr);
+umf_result_t umfPoolMallocUsableSize(umf_memory_pool_handle_t hPool,
+                                     const void *ptr, size_t *size);
 
 ///
 /// @brief Frees the memory space of the specified \p hPool pointed by \p ptr
@@ -154,7 +156,7 @@ umf_result_t umfPoolGetLastAllocationError(umf_memory_pool_handle_t hPool);
 /// @param ptr pointer to memory belonging to a memory pool
 /// @return Handle to a memory pool that contains ptr or NULL if pointer does not belong to any UMF pool.
 ///
-umf_memory_pool_handle_t umfPoolByPtr(const void *ptr);
+umf_result_t umfPoolByPtr(const void *ptr, umf_memory_pool_handle_t *pool);
 
 ///
 /// @brief Retrieve memory provider associated with a given pool.
@@ -172,7 +174,7 @@ umf_result_t umfPoolGetMemoryProvider(umf_memory_pool_handle_t hPool,
 /// @return pointer to a string containing the name of the \p pool
 ///         or NULL if the pool doesn't support retrieving its name.
 ///
-const char *umfPoolGetName(umf_memory_pool_handle_t pool);
+umf_result_t umfPoolGetName(umf_memory_pool_handle_t pool, const char **name);
 
 ///
 /// @brief Set a custom tag on the memory pool that can be later retrieved using umfPoolGetTag.

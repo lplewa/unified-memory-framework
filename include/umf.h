@@ -7,6 +7,7 @@
  *
  */
 
+#include "umf/base.h"
 #ifndef UMF_UNIFIED_MEMORY_FRAMEWORK_H
 #define UMF_UNIFIED_MEMORY_FRAMEWORK_H 1
 
@@ -24,17 +25,17 @@ extern "C" {
 ///         if the usage reference counter was equal to 0.
 ///         It must be called just after dlopen() and it is not required in other scenarios.
 /// @return 0 on success or -1 on failure.
-int umfInit(void);
+umf_result_t umfInit(void);
 
 ///
 /// @brief Decrement the usage reference counter and destroy the global state of libumf
 ///        if the usage reference counter is equal to 0.
 ///        It must be called just before dlclose() and it is not required in other scenarios.
-void umfTearDown(void);
+umf_result_t umfTearDown(void);
 
 ///
 /// @brief Get the current version of the UMF headers defined by UMF_VERSION_CURRENT.
-int umfGetCurrentVersion(void);
+umf_result_t umfGetCurrentVersion(void);
 
 #ifdef __cplusplus
 }
