@@ -36,6 +36,8 @@ void fini_ze_global_state(void) {
 #include "utils_concurrency.h"
 #include "utils_log.h"
 #include "utils_sanitizers.h"
+#include "critnib.h"
+#include "provider_ctl_stats_type.h"
 #include "ze_api.h"
 
 // Level Zero Memory Provider settings struct
@@ -73,7 +75,17 @@ typedef struct ze_memory_provider_t {
     size_t min_page_size;
 
     uint32_t device_ordinal;
+
+    critnib *allocations;
+    ctl_stats_t stats;
+    utils_rwlock_t lock; // lock for residency updates and allocations
 } ze_memory_provider_t;
+
+#define CTL_PROVIDER_TYPE ze_memory_provider_t
+#include "provider_ctl_stats_impl.h"
+
+struct ctl level_zero_ctl_root;
+static UTIL_ONCE_FLAG ctl_initialized = UTIL_ONCE_FLAG_INIT;
 
 typedef struct ze_ops_t {
     ze_result_t (*zeMemAllocHost)(ze_context_handle_t,
@@ -97,6 +109,8 @@ typedef struct ze_ops_t {
     ze_result_t (*zeContextMakeMemoryResident)(ze_context_handle_t,
                                                ze_device_handle_t, void *,
                                                size_t);
+    ze_result_t (*zeContextEvictMemory)(ze_context_handle_t, ze_device_handle_t,
+                                        void *, size_t);
     ze_result_t (*zeDeviceGetProperties)(ze_device_handle_t,
                                          ze_device_properties_t *);
     ze_result_t (*zeMemFreeExt)(ze_context_handle_t,
@@ -190,6 +204,8 @@ static void init_ze_global_state(void) {
         utils_get_symbol_addr(lib_handle, "zeMemCloseIpcHandle", lib_name);
     *(void **)&g_ze_ops.zeContextMakeMemoryResident = utils_get_symbol_addr(
         lib_handle, "zeContextMakeMemoryResident", lib_name);
+    *(void **)&g_ze_ops.zeContextEvictMemory =
+        utils_get_symbol_addr(lib_handle, "zeContextEvictMemory", lib_name);
     *(void **)&g_ze_ops.zeDeviceGetProperties =
         utils_get_symbol_addr(lib_handle, "zeDeviceGetProperties", lib_name);
     *(void **)&g_ze_ops.zeMemFreeExt =
@@ -202,7 +218,8 @@ static void init_ze_global_state(void) {
         !g_ze_ops.zeMemGetIpcHandle || !g_ze_ops.zeMemOpenIpcHandle ||
         !g_ze_ops.zeMemCloseIpcHandle ||
         !g_ze_ops.zeContextMakeMemoryResident ||
-        !g_ze_ops.zeDeviceGetProperties || !g_ze_ops.zeMemGetAllocProperties) {
+        !g_ze_ops.zeContextEvictMemory || !g_ze_ops.zeDeviceGetProperties ||
+        !g_ze_ops.zeMemGetAllocProperties) {
         // g_ze_ops.zeMemPutIpcHandle can be NULL because it was introduced
         // starting from Level Zero 1.6
         LOG_FATAL("Required Level Zero symbols not found.");
@@ -211,6 +228,134 @@ static void init_ze_global_state(void) {
         return;
     }
     ze_lib_handle = lib_handle;
+}
+
+struct device_action_args {
+    ze_memory_provider_t *provider;
+    ze_device_handle_t device;
+    umf_result_t result;
+};
+
+static int make_resident_iter(uintptr_t key, void *value, void *priv) {
+    struct device_action_args *args = priv;
+    size_t size = (size_t)value;
+    ze_result_t zr = g_ze_ops.zeContextMakeMemoryResident(
+        args->provider->context, args->device, (void *)key, size);
+    if (zr != ZE_RESULT_SUCCESS) {
+        args->result = ze2umf_result(zr);
+        return 1;
+    }
+    return 0;
+}
+
+static int evict_memory_iter(uintptr_t key, void *value, void *priv) {
+    struct device_action_args *args = priv;
+    size_t size = (size_t)value;
+    ze_result_t zr = g_ze_ops.zeContextEvictMemory(
+        args->provider->context, args->device, (void *)key, size);
+    if (zr != ZE_RESULT_SUCCESS) {
+        args->result = ze2umf_result(zr);
+        return 1;
+    }
+    return 0;
+}
+
+static umf_result_t CTL_RUNNABLE_HANDLER(add_resident_device)(
+    void *ctx, umf_ctl_query_source_t source, void *arg, size_t size,
+    umf_ctl_index_utlist_t *indexes, const char *extra_name,
+    umf_ctl_query_type_t query_type) {
+    (void)indexes;
+    (void)source;
+    (void)extra_name;
+    (void)query_type;
+
+    if (!arg || size != sizeof(ze_device_handle_t)) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
+    ze_memory_provider_t *provider = (ze_memory_provider_t *)ctx;
+    ze_device_handle_t device = *(ze_device_handle_t *)arg;
+
+    utils_write_lock(&provider->lock);
+
+    ze_device_handle_t *new_list = umf_ba_global_alloc(
+        sizeof(ze_device_handle_t) * (provider->resident_device_count + 1));
+    if (!new_list) {
+        utils_write_unlock(&provider->lock);
+        return UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
+    }
+
+    for (uint32_t i = 0; i < provider->resident_device_count; i++) {
+        new_list[i] = provider->resident_device_handles[i];
+    }
+    new_list[provider->resident_device_count] = device;
+
+    umf_ba_global_free(provider->resident_device_handles);
+    provider->resident_device_handles = new_list;
+    provider->resident_device_count++;
+
+    struct device_action_args args_iter = {provider, device,
+                                           UMF_RESULT_SUCCESS};
+    critnib_iter(provider->allocations, 0, UINTPTR_MAX, make_resident_iter,
+                 &args_iter);
+
+    utils_write_unlock(&provider->lock);
+
+    return args_iter.result;
+}
+
+static umf_result_t CTL_RUNNABLE_HANDLER(remove_resident_device)(
+    void *ctx, umf_ctl_query_source_t source, void *arg, size_t size,
+    umf_ctl_index_utlist_t *indexes, const char *extra_name,
+    umf_ctl_query_type_t query_type) {
+    (void)indexes;
+    (void)source;
+    (void)extra_name;
+    (void)query_type;
+
+    if (!arg || size != sizeof(ze_device_handle_t)) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
+    ze_memory_provider_t *provider = (ze_memory_provider_t *)ctx;
+    ze_device_handle_t device = *(ze_device_handle_t *)arg;
+
+    utils_write_lock(&provider->lock);
+
+    bool found = false;
+    for (uint32_t i = 0; i < provider->resident_device_count; i++) {
+        if (provider->resident_device_handles[i] == device) {
+            found = true;
+            for (uint32_t j = i + 1; j < provider->resident_device_count; j++) {
+                provider->resident_device_handles[j - 1] =
+                    provider->resident_device_handles[j];
+            }
+            provider->resident_device_count--;
+            break;
+        }
+    }
+    if (!found) {
+        utils_write_unlock(&provider->lock);
+        return UMF_RESULT_SUCCESS;
+    }
+
+    struct device_action_args args_iter = {provider, device,
+                                           UMF_RESULT_SUCCESS};
+    critnib_iter(provider->allocations, 0, UINTPTR_MAX, evict_memory_iter,
+                 &args_iter);
+
+    utils_write_unlock(&provider->lock);
+
+    return args_iter.result;
+}
+
+static const umf_ctl_node_t CTL_NODE(residency)[] = {
+    CTL_LEAF_RUNNABLE(add_resident_device),
+    CTL_LEAF_RUNNABLE(remove_resident_device), CTL_NODE_END};
+
+static void initialize_level_zero_ctl(void) {
+    CTL_REGISTER_MODULE(&level_zero_ctl_root, stats);
+    CTL_REGISTER_MODULE(&level_zero_ctl_root, residency);
 }
 
 umf_result_t umfLevelZeroMemoryProviderParamsCreate(
@@ -368,6 +513,8 @@ static umf_result_t ze_memory_provider_alloc(void *provider, size_t size,
                                              void **resultPtr) {
     ze_memory_provider_t *ze_provider = (ze_memory_provider_t *)provider;
 
+    utils_read_lock(&ze_provider->lock);
+
     ze_result_t ze_result = ZE_RESULT_SUCCESS;
     switch (ze2umf_memory_type(ze_provider->memory_type)) {
     case UMF_MEMORY_TYPE_HOST: {
@@ -417,6 +564,7 @@ static umf_result_t ze_memory_provider_alloc(void *provider, size_t size,
     }
 
     if (ze_result != ZE_RESULT_SUCCESS) {
+        utils_read_unlock(&ze_provider->lock);
         return ze2umf_result(ze_result);
     }
 
@@ -425,9 +573,15 @@ static umf_result_t ze_memory_provider_alloc(void *provider, size_t size,
             ze_provider->context, ze_provider->resident_device_handles[i],
             *resultPtr, size);
         if (ze_result != ZE_RESULT_SUCCESS) {
+            utils_read_unlock(&ze_provider->lock);
             return ze2umf_result(ze_result);
         }
     }
+
+    critnib_insert(ze_provider->allocations, (uintptr_t)(*resultPtr),
+                   (void *)(uintptr_t)size, 0);
+    provider_ctl_stats_alloc(ze_provider, size);
+    utils_read_unlock(&ze_provider->lock);
 
     return ze2umf_result(ze_result);
 }
@@ -441,9 +595,17 @@ static umf_result_t ze_memory_provider_free(void *provider, void *ptr,
     }
 
     ze_memory_provider_t *ze_provider = (ze_memory_provider_t *)provider;
+    utils_read_lock(&ze_provider->lock);
 
     if (ze_provider->freePolicyFlags == 0) {
-        return ze2umf_result(g_ze_ops.zeMemFree(ze_provider->context, ptr));
+        umf_result_t ret =
+            ze2umf_result(g_ze_ops.zeMemFree(ze_provider->context, ptr));
+        if (ret == UMF_RESULT_SUCCESS) {
+            critnib_remove_release(ze_provider->allocations, (uintptr_t)ptr);
+            provider_ctl_stats_free(ze_provider, bytes);
+        }
+        utils_read_unlock(&ze_provider->lock);
+        return ret;
     }
 
     ze_memory_free_ext_desc_t desc = {
@@ -451,8 +613,14 @@ static umf_result_t ze_memory_provider_free(void *provider, void *ptr,
         .pNext = NULL,
         .freePolicy = ze_provider->freePolicyFlags};
 
-    return ze2umf_result(
+    umf_result_t ret = ze2umf_result(
         g_ze_ops.zeMemFreeExt(ze_provider->context, &desc, ptr));
+    if (ret == UMF_RESULT_SUCCESS) {
+        critnib_remove_release(ze_provider->allocations, (uintptr_t)ptr);
+        provider_ctl_stats_free(ze_provider, bytes);
+    }
+    utils_read_unlock(&ze_provider->lock);
+    return ret;
 }
 
 static umf_result_t query_min_page_size(ze_memory_provider_t *ze_provider,
@@ -482,6 +650,8 @@ static umf_result_t query_min_page_size(ze_memory_provider_t *ze_provider,
 static umf_result_t ze_memory_provider_finalize(void *provider) {
     ze_memory_provider_t *ze_provider = (ze_memory_provider_t *)provider;
     umf_ba_global_free(ze_provider->resident_device_handles);
+    utils_rwlock_destroy_not_free(&ze_provider->lock);
+    critnib_delete(ze_provider->allocations);
 
     umf_ba_global_free(provider);
     return UMF_RESULT_SUCCESS;
@@ -534,6 +704,17 @@ static umf_result_t ze_memory_provider_initialize(const void *params,
         umfFreePolicyToZePolicy(ze_params->freePolicy);
     ze_provider->min_page_size = 0;
     ze_provider->device_ordinal = ze_params->device_ordinal;
+    ze_provider->allocations = critnib_new(NULL, NULL);
+    if (!ze_provider->allocations) {
+        umf_ba_global_free(ze_provider);
+        return UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
+    }
+    if (utils_rwlock_init(&ze_provider->lock) == NULL) {
+        umf_ba_global_free(ze_provider);
+        return UMF_RESULT_ERROR_UNKNOWN;
+    }
+    ze_provider->stats.allocated_memory = 0;
+    ze_provider->stats.peak_memory = 0;
 
     memset(&ze_provider->device_properties, 0,
            sizeof(ze_provider->device_properties));
@@ -576,6 +757,8 @@ static umf_result_t ze_memory_provider_initialize(const void *params,
         ze_memory_provider_finalize(ze_provider);
         return result;
     }
+
+    utils_init_once(&ctl_initialized, initialize_level_zero_ctl);
 
     *provider = ze_provider;
 
@@ -787,6 +970,14 @@ ze_memory_provider_close_ipc_handle(void *provider, void *ptr, size_t size) {
     return UMF_RESULT_SUCCESS;
 }
 
+static umf_result_t ze_ctl(void *provider, int operationType, const char *name,
+                           void *arg, size_t size,
+                           umf_ctl_query_type_t query_type) {
+    utils_init_once(&ctl_initialized, initialize_level_zero_ctl);
+    return ctl_query(&level_zero_ctl_root, provider, operationType, name,
+                     query_type, arg, size);
+}
+
 static umf_memory_provider_ops_t UMF_LEVEL_ZERO_MEMORY_PROVIDER_OPS = {
     .version = UMF_PROVIDER_OPS_VERSION_CURRENT,
     .initialize = ze_memory_provider_initialize,
@@ -806,6 +997,7 @@ static umf_memory_provider_ops_t UMF_LEVEL_ZERO_MEMORY_PROVIDER_OPS = {
     .ext_put_ipc_handle = ze_memory_provider_put_ipc_handle,
     .ext_open_ipc_handle = ze_memory_provider_open_ipc_handle,
     .ext_close_ipc_handle = ze_memory_provider_close_ipc_handle,
+    .ext_ctl = ze_ctl,
 };
 
 const umf_memory_provider_ops_t *umfLevelZeroMemoryProviderOps(void) {
