@@ -4,6 +4,7 @@
 
 #include "base.hpp"
 #include "test_helpers.h"
+#include <regex>
 
 #define MOCK_FILE_PTR (FILE *)0xBADBEEF
 #define INVALID_ERRNO 42
@@ -25,9 +26,11 @@ std::string expected_message = "[ERROR UMF] utils_log_init: Logging output not "
 FILE *expected_stream = stderr;
 int expect_fput_count = 0;
 int fput_count = 0;
+std::string last_message;
 
 int mock_fputs(const char *s, FILE *stream) {
     fput_count++;
+    last_message = s;
     if (!expected_message.empty()) {
         EXPECT_STREQ(s, expected_message.c_str());
     }
@@ -257,6 +260,7 @@ TEST_F(test, parseEnv) {
 template <typename... Args> void helper_test_log(Args... args) {
     fput_count = 0;
     fflush_count = 0;
+    last_message.clear();
     utils_log(args...);
     EXPECT_EQ(fput_count, expect_fput_count);
     EXPECT_EQ(fflush_count, expect_fflush_count);
@@ -351,20 +355,24 @@ TEST_F(test, timestamp_log) {
     expect_fput_count = 1;
     expect_fflush_count = 1;
     loggerConfig = {1, 0, LOG_DEBUG, LOG_DEBUG, stderr};
-    // TODO: for now we do not check output message,
-    // as it requires more sophisticated message validation (a.k.a regrex)
     expected_message = "";
     helper_test_log(LOG_DEBUG, MOCK_FN_NAME.c_str(), "%s", "example log");
+
+    std::regex r("^\\[\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2} DEBUG UMF\\] "
+                 + MOCK_FN_NAME + ": example log\\n$");
+    EXPECT_TRUE(std::regex_match(last_message, r));
 }
 
 TEST_F(test, pid_log) {
     expect_fput_count = 1;
     expect_fflush_count = 1;
     loggerConfig = {0, 1, LOG_DEBUG, LOG_DEBUG, stderr};
-    // TODO: for now we do not check output message,
-    // as it requires more sophisticated message validation (a.k.a regrex)
     expected_message = "";
     helper_test_log(LOG_DEBUG, MOCK_FN_NAME.c_str(), "%s", "example log");
+
+    std::regex r("^\\[PID:[0-9]+\\s+TID:[0-9]+\\s+DEBUG UMF\\] " + MOCK_FN_NAME +
+                 ": example log\\n$");
+    EXPECT_TRUE(std::regex_match(last_message, r));
 }
 
 TEST_F(test, log_fatal) {
