@@ -334,6 +334,23 @@ TEST_P(umfProviderTest, get_name) {
     ASSERT_STREQ(name, "OS");
 }
 
+TEST(OsProviderName, custom_name) {
+    auto params = createOsMemoryProviderParams();
+    ASSERT_NE(params.get(), nullptr);
+    const char *custom = "my_os";
+    ASSERT_EQ(umfOsMemoryProviderParamsSetName(params.get(), custom),
+              UMF_RESULT_SUCCESS);
+
+    umf_memory_provider_handle_t prov = nullptr;
+    ASSERT_EQ(umfMemoryProviderCreate(umfOsMemoryProviderOps(), params.get(),
+                                      &prov),
+              UMF_RESULT_SUCCESS);
+    const char *name = nullptr;
+    EXPECT_EQ(umfMemoryProviderGetName(prov, &name), UMF_RESULT_SUCCESS);
+    EXPECT_STREQ(name, custom);
+    umfMemoryProviderDestroy(prov);
+}
+
 TEST_P(umfProviderTest, free_size_0_ptr_not_null) {
     umf_result_t umf_result =
         umfMemoryProviderFree(provider.get(), INVALID_PTR, 0);

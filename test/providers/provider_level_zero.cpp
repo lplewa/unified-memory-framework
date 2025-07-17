@@ -389,6 +389,25 @@ TEST_P(umfLevelZeroProviderTest, getName) {
     umfMemoryProviderDestroy(provider);
 }
 
+TEST_P(umfLevelZeroProviderTest, custom_name) {
+    const char *custom = "my_level_zero";
+    ASSERT_EQ(umfLevelZeroMemoryProviderParamsSetName(params, custom),
+              UMF_RESULT_SUCCESS);
+
+    umf_memory_provider_handle_t provider = nullptr;
+    umf_result_t res = umfMemoryProviderCreate(umfLevelZeroMemoryProviderOps(),
+                                               params, &provider);
+    ASSERT_EQ(res, UMF_RESULT_SUCCESS);
+    ASSERT_NE(provider, nullptr);
+
+    const char *name = nullptr;
+    res = umfMemoryProviderGetName(provider, &name);
+    ASSERT_EQ(res, UMF_RESULT_SUCCESS);
+    EXPECT_STREQ(name, custom);
+
+    umfMemoryProviderDestroy(provider);
+}
+
 TEST_P(umfLevelZeroProviderTest, allocInvalidSize) {
     umf_memory_provider_handle_t provider = nullptr;
     umf_result_t umf_result = umfMemoryProviderCreate(

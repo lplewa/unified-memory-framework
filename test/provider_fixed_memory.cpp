@@ -278,6 +278,31 @@ TEST_P(FixedProviderTest, get_name) {
     ASSERT_STREQ(name, "FIXED");
 }
 
+TEST(FixedProviderName, custom_name) {
+    size_t mem_size = utils_get_page_size();
+    void *buffer = malloc(mem_size);
+    ASSERT_NE(buffer, nullptr);
+
+    umf_fixed_memory_provider_params_handle_t params = nullptr;
+    ASSERT_EQ(umfFixedMemoryProviderParamsCreate(buffer, mem_size, &params),
+              UMF_RESULT_SUCCESS);
+    const char *custom = "my_fixed";
+    ASSERT_EQ(umfFixedMemoryProviderParamsSetName(params, custom),
+              UMF_RESULT_SUCCESS);
+
+    umf_memory_provider_handle_t prov = nullptr;
+    ASSERT_EQ(umfMemoryProviderCreate(umfFixedMemoryProviderOps(), params, &prov),
+              UMF_RESULT_SUCCESS);
+
+    const char *name = nullptr;
+    EXPECT_EQ(umfMemoryProviderGetName(prov, &name), UMF_RESULT_SUCCESS);
+    EXPECT_STREQ(name, custom);
+
+    umfMemoryProviderDestroy(prov);
+    umfFixedMemoryProviderParamsDestroy(params);
+    free(buffer);
+}
+
 TEST_P(FixedProviderTest, free_size_0_ptr_not_null) {
     umf_result_t umf_result =
         umfMemoryProviderFree(provider.get(), INVALID_PTR, 0);

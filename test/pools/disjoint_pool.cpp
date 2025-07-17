@@ -361,6 +361,34 @@ TEST_F(test, disjointPoolName) {
     umfDisjointPoolParamsDestroy(params);
 }
 
+TEST_F(test, disjointPoolCustomName) {
+    umf_disjoint_pool_params_handle_t params = nullptr;
+    umf_result_t res = umfDisjointPoolParamsCreate(&params);
+    EXPECT_EQ(res, UMF_RESULT_SUCCESS);
+
+    res = umfDisjointPoolParamsSetName(params, "my_disjoint");
+    EXPECT_EQ(res, UMF_RESULT_SUCCESS);
+
+    struct memory_provider : public umf_test::provider_base_t {};
+
+    umf_memory_provider_ops_t provider_ops =
+        umf_test::providerMakeCOps<memory_provider, void>();
+    auto providerUnique =
+        wrapProviderUnique(createProviderChecked(&provider_ops, nullptr));
+    umf_memory_pool_handle_t pool = NULL;
+
+    res = umfPoolCreate(umfDisjointPoolOps(), providerUnique.get(), params, 0,
+                        &pool);
+    EXPECT_EQ(res, UMF_RESULT_SUCCESS);
+    const char *name = nullptr;
+    res = umfPoolGetName(pool, &name);
+    EXPECT_EQ(res, UMF_RESULT_SUCCESS);
+    EXPECT_STREQ(name, "my_disjoint");
+
+    umfPoolDestroy(pool);
+    umfDisjointPoolParamsDestroy(params);
+}
+
 TEST_F(test, disjointPoolDefaultParams) {
     // Disjoint pool defaults
     static constexpr size_t DefaultSlabMinSize = 64 * 1024;           // 64K

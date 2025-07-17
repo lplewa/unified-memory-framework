@@ -12,12 +12,14 @@
 #include <string.h>
 
 #include "base_alloc_global.h"
+#include "umf/base.h"
 #include "utils_common.h"
 #include "utils_concurrency.h"
 #include "utils_log.h"
 #include "utils_sanitizers.h"
 
 #include <umf/memory_pool.h>
+#define DEFAULT_NAME "jemalloc"
 #include <umf/memory_pool_ops.h>
 #include <umf/pools/pool_jemalloc.h>
 
@@ -44,6 +46,13 @@ umfJemallocPoolParamsSetNumArenas(umf_jemalloc_pool_params_handle_t hParams,
     return UMF_RESULT_ERROR_NOT_SUPPORTED;
 }
 
+umf_result_t
+umfJemallocPoolParamsSetName(umf_jemalloc_pool_params_handle_t hParams,
+                             const char *name) {
+    (void)hParams; // unused
+    (void)name;    // unused
+    return UMF_RESULT_ERROR_NOT_SUPPORTED;
+}
 #else
 
 #include <jemalloc/jemalloc.h>
@@ -52,11 +61,13 @@ umfJemallocPoolParamsSetNumArenas(umf_jemalloc_pool_params_handle_t hParams,
 
 typedef struct umf_jemalloc_pool_params_t {
     size_t n_arenas;
+    char name[64];
 } umf_jemalloc_pool_params_t;
 
 typedef struct jemalloc_memory_pool_t {
     umf_memory_provider_handle_t provider;
     size_t n_arenas;
+    char name[64];
     unsigned int arena_index[];
 } jemalloc_memory_pool_t;
 
@@ -459,6 +470,13 @@ static umf_result_t op_initialize(umf_memory_provider_handle_t provider,
     if (!pool) {
         return UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
     }
+    memset(pool, 0, sizeof(*pool) + n_arenas * sizeof(*pool->arena_index));
+    const char *pool_name = DEFAULT_NAME;
+    if (jemalloc_params) {
+        pool_name = jemalloc_params->name;
+    }
+    strncpy(pool->name, pool_name, sizeof(pool->name) - 1);
+    pool->name[sizeof(pool->name) - 1] = '\0';
 
     pool->provider = provider;
     pool->n_arenas = n_arenas;
@@ -558,8 +576,15 @@ static umf_result_t op_get_last_allocation_error(void *pool) {
 }
 
 static umf_result_t op_get_name(void *pool, const char **name) {
-    (void)pool;
-    *name = "jemalloc";
+    if (!name) {
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+    if (pool == NULL) {
+        *name = DEFAULT_NAME;
+        return UMF_RESULT_SUCCESS;
+    }
+    jemalloc_memory_pool_t *je_pool = (jemalloc_memory_pool_t *)pool;
+    *name = je_pool->name;
     return UMF_RESULT_SUCCESS;
 }
 
@@ -588,6 +613,8 @@ umfJemallocPoolParamsCreate(umf_jemalloc_pool_params_handle_t *hParams) {
         return UMF_RESULT_ERROR_OUT_OF_HOST_MEMORY;
     }
     memset(params, 0, sizeof(*params));
+    strncpy(params->name, DEFAULT_NAME, sizeof(params->name) - 1);
+    params->name[sizeof(params->name) - 1] = '\0';
     *hParams = params;
     return UMF_RESULT_SUCCESS;
 }
@@ -606,6 +633,24 @@ umfJemallocPoolParamsSetNumArenas(umf_jemalloc_pool_params_handle_t hParams,
         return UMF_RESULT_ERROR_INVALID_ARGUMENT;
     }
     hParams->n_arenas = numArenas;
+    return UMF_RESULT_SUCCESS;
+}
+
+umf_result_t umfJemallocPoolParamsSetName(
+    umf_jemalloc_pool_params_handle_t hParams, const char *name) {
+    if (!hParams) {
+        LOG_ERR("jemalloc pool params handle is NULL");
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (!name) {
+        LOG_ERR("name is NULL");
+        return UMF_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
+    strncpy(hParams->name, name, sizeof(hParams->name) - 1);
+    hParams->name[sizeof(hParams->name) - 1] = '\0';
+
     return UMF_RESULT_SUCCESS;
 }
 
